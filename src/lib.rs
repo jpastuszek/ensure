@@ -17,7 +17,7 @@ pub enum MeetResult<N, M> {
 use IsMetResult::*;
 use MeetResult::*;
 
-pub trait Promise: Sized {
+pub trait Meetable: Sized {
     type Meet: Meet;
     type Met;
     type Error: Into<<Self::Meet as Meet>::Error>;
@@ -45,7 +45,7 @@ pub trait Meet {
     fn meet(self) -> Result<Self::Met, Self::Error>;
 }
 
-impl<MET, MEET, IMF, METE> Promise for IMF 
+impl<MET, MEET, IMF, METE> Meetable for IMF 
 where IMF: FnOnce() -> Result<IsMetResult<MET, MEET>, METE>, MEET: Meet, METE: Into<<MEET as Meet>::Error> {
     type Meet = MEET;
     type Met = MET;
@@ -85,7 +85,7 @@ mod test {
 
     #[test]
     fn closure() {
-        fn promise(met: bool, fail: bool) -> impl Promise<Met = u8, Meet = impl Meet<Met = u16, Error = i16>, Error = i8> {
+        fn promise(met: bool, fail: bool) -> impl Meetable<Met = u8, Meet = impl Meet<Met = u16, Error = i16>, Error = i8> {
             move || {
                 match (met, fail) {
                     (true, false) => Ok(IsMet(1)),
