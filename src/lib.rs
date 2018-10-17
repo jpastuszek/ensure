@@ -1,24 +1,36 @@
 #[cfg(test)]
 #[macro_use]
 extern crate assert_matches;
-extern crate either;
-use either::Either;
-use either::Either::*;
+
+#[derive(Debug)]
+pub enum IsMetResult<M, U> {
+    IsMet(M),
+    IsUnmet(U),
+}
+
+#[derive(Debug)]
+pub enum MeetResult<N, M> {
+    NothingToDo(N),
+    NowMet(M),
+}
+
+use IsMetResult::*;
+use MeetResult::*;
 
 pub trait Promise: Sized {
     type Meet: Meet;
     type Met;
     type Error: Into<<Self::Meet as Meet>::Error>;
 
-    fn is_met(self) -> Result<Either<Self::Met, Self::Meet>, Self::Error>;
+    fn is_met(self) -> Result<IsMetResult<Self::Met, Self::Meet>, Self::Error>;
 
-    fn meet(self) -> Result<Either<Self::Met, <Self::Meet as Meet>::Met>, <Self::Meet as Meet>::Error> {
+    fn meet(self) -> Result<MeetResult<Self::Met, <Self::Meet as Meet>::Met>, <Self::Meet as Meet>::Error> {
         match self.is_met() {
-            Ok(Left(met)) => Ok(Left(met)),
+            Ok(IsMet(met)) => Ok(NothingToDo(met)),
             Err(err) => Err(err.into()),
-            Ok(Right(meet)) => {
+            Ok(IsUnmet(meet)) => {
                 match meet.meet() {
-                    Ok(met) => Ok(Right(met)),
+                    Ok(met) => Ok(NowMet(met)),
                     Err(err) => Err(err)
                 }
             }
@@ -34,12 +46,12 @@ pub trait Meet {
 }
 
 impl<MET, MEET, IMF, METE> Promise for IMF 
-where IMF: FnOnce() -> Result<Either<MET, MEET>, METE>, MEET: Meet, METE: Into<<MEET as Meet>::Error> {
+where IMF: FnOnce() -> Result<IsMetResult<MET, MEET>, METE>, MEET: Meet, METE: Into<<MEET as Meet>::Error> {
     type Meet = MEET;
     type Met = MET;
     type Error = METE;
 
-    fn is_met(self) -> Result<Either<Self::Met, Self::Meet>, Self::Error> {
+    fn is_met(self) -> Result<IsMetResult<Self::Met, Self::Meet>, Self::Error> {
         self()
     }
 }
@@ -76,9 +88,9 @@ mod test {
         fn promise(met: bool, fail: bool) -> impl Promise<Met = u8, Meet = impl Meet<Met = u16, Error = i16>, Error = i8> {
             move || {
                 match (met, fail) {
-                    (true, false) => Ok(Left(1)),
+                    (true, false) => Ok(IsMet(1)),
                     (true, true) => Err(2),
-                    _ => Ok(Right(move || match fail {
+                    _ => Ok(IsUnmet(move || match fail {
                         false => Ok(3),
                         true => Err(4),
                     }))
@@ -86,9 +98,9 @@ mod test {
             }
         }
 
-        assert_matches!(promise(true, false).meet(), Ok(Left(1u8)));
+        assert_matches!(promise(true, false).meet(), Ok(NothingToDo(1u8)));
         assert_matches!(promise(true, true).meet(), Err(2i16));
-        assert_matches!(promise(false, false).meet(), Ok(Right(3u16)));
+        assert_matches!(promise(false, false).meet(), Ok(NowMet(3u16)));
         assert_matches!(promise(false, true).meet(), Err(4i16));
     }
 }
