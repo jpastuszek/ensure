@@ -8,18 +8,18 @@ use either::Either::*;
 pub trait Promise: Sized {
     type Meet: Meet;
     type Met;
-    type Error;
+    type Error: Into<<Self::Meet as Meet>::Error>;
 
     fn is_met(self) -> Result<Either<Self::Met, Self::Meet>, Self::Error>;
 
-    fn meet(self) -> Result<Either<Self::Met, <Self::Meet as Meet>::Met>, Either<Self::Error, <Self::Meet as Meet>::Error>> {
+    fn meet(self) -> Result<Either<Self::Met, <Self::Meet as Meet>::Met>, <Self::Meet as Meet>::Error> {
         match self.is_met() {
             Ok(Left(met)) => Ok(Left(met)),
-            Err(err) => Err(Left(err)),
+            Err(err) => Err(err.into()),
             Ok(Right(meet)) => {
                 match meet.meet() {
                     Ok(met) => Ok(Right(met)),
-                    Err(err) => Err(Right(err))
+                    Err(err) => Err(err)
                 }
             }
         }
@@ -34,7 +34,7 @@ pub trait Meet {
 }
 
 impl<MET, MEET, IMF, METE> Promise for IMF 
-where IMF: FnOnce() -> Result<Either<MET, MEET>, METE>, MEET: Meet {
+where IMF: FnOnce() -> Result<Either<MET, MEET>, METE>, MEET: Meet, METE: Into<<MEET as Meet>::Error> {
     type Meet = MEET;
     type Met = MET;
     type Error = METE;
@@ -87,8 +87,8 @@ mod test {
         }
 
         assert_matches!(promise(true, false).meet(), Ok(Left(1u8)));
-        assert_matches!(promise(true, true).meet(), Err(Left(2i8)));
+        assert_matches!(promise(true, true).meet(), Err(2i16));
         assert_matches!(promise(false, false).meet(), Ok(Right(3u16)));
-        assert_matches!(promise(false, true).meet(), Err(Right(4i16)));
+        assert_matches!(promise(false, true).meet(), Err(4i16));
     }
 }
