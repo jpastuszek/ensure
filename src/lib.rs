@@ -3,9 +3,9 @@
 extern crate assert_matches;
 
 #[derive(Debug)]
-pub enum IsMetResult<M, U> {
-    IsMet(M),
-    IsUnmet(U),
+pub enum MetResult<M, U> {
+    Met(M),
+    Unmet(U),
 }
 
 #[derive(Debug)]
@@ -14,23 +14,20 @@ pub enum MeetResult<N, M> {
     NowMet(M),
 }
 
-use IsMetResult::*;
-use MeetResult::*;
-
 pub trait Meetable: Sized {
     type Meet: Meet;
     type Met;
     type Error: Into<<Self::Meet as Meet>::Error>;
 
-    fn is_met(self) -> Result<IsMetResult<Self::Met, Self::Meet>, Self::Error>;
+    fn is_met(self) -> Result<MetResult<Self::Met, Self::Meet>, Self::Error>;
 
     fn meet(self) -> Result<MeetResult<Self::Met, <Self::Meet as Meet>::Met>, <Self::Meet as Meet>::Error> {
         match self.is_met() {
-            Ok(IsMet(met)) => Ok(NothingToDo(met)),
+            Ok(MetResult::Met(met)) => Ok(MeetResult::NothingToDo(met)),
             Err(err) => Err(err.into()),
-            Ok(IsUnmet(meet)) => {
+            Ok(MetResult::Unmet(meet)) => {
                 match meet.meet() {
-                    Ok(met) => Ok(NowMet(met)),
+                    Ok(met) => Ok(MeetResult::NowMet(met)),
                     Err(err) => Err(err)
                 }
             }
@@ -46,12 +43,12 @@ pub trait Meet {
 }
 
 impl<MET, MEET, IMF, METE> Meetable for IMF 
-where IMF: FnOnce() -> Result<IsMetResult<MET, MEET>, METE>, MEET: Meet, METE: Into<<MEET as Meet>::Error> {
+where IMF: FnOnce() -> Result<MetResult<MET, MEET>, METE>, MEET: Meet, METE: Into<<MEET as Meet>::Error> {
     type Meet = MEET;
     type Met = MET;
     type Error = METE;
 
-    fn is_met(self) -> Result<IsMetResult<Self::Met, Self::Meet>, Self::Error> {
+    fn is_met(self) -> Result<MetResult<Self::Met, Self::Meet>, Self::Error> {
         self()
     }
 }
@@ -82,15 +79,17 @@ pub trait Existential: Sized {
 #[cfg(test)]
 mod test {
     use super::*;
+    use super::MetResult::*;
+    use super::MeetResult::*;
 
     #[test]
     fn closure() {
         fn promise(met: bool, fail: bool) -> impl Meetable<Met = u8, Meet = impl Meet<Met = u16, Error = i16>, Error = i8> {
             move || {
                 match (met, fail) {
-                    (true, false) => Ok(IsMet(1)),
+                    (true, false) => Ok(Met(1)),
                     (true, true) => Err(2),
-                    _ => Ok(IsUnmet(move || match fail {
+                    _ => Ok(Unmet(move || match fail {
                         false => Ok(3),
                         true => Err(4),
                     }))
