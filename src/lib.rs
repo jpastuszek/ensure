@@ -35,6 +35,20 @@ pub trait Meetable: Sized {
             }
         }
     }
+
+    /// Meet and assert it is Met
+    fn meet_assert(self) -> Result<Self::Met, <Self::MeetAction as MeetAction>::Error> where Self: Clone {
+        let verify = self.clone();
+        match self.meet() {
+            Err(err) => Err(err),
+            Ok(Meet::AlreadyMet(met)) => Ok(met),
+            Ok(Meet::Met(_action_met)) => match verify.try_met() {
+                Err(err) => Err(err.into()),
+                Ok(TryMet::Met(met)) => Ok(met),
+                Ok(TryMet::MeetAction(_action)) => panic!("Meetable not Met after applying MeetAction")
+            }
+        }
+    }
 }
 
 pub trait MeetAction {
