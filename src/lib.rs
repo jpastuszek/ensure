@@ -3,31 +3,33 @@
 extern crate assert_matches;
 
 #[derive(Debug)]
-pub enum MetResult<M, U> {
+pub enum TryMet<M, U> {
     Met(M),
-    Unmet(U),
+    MeetAction(U),
 }
 
 #[derive(Debug)]
-pub enum MeetResult<N, M> {
-    NothingToDo(N),
-    NowMet(M),
+pub enum Meet<N, M> {
+    AlreadyMet(N),
+    Met(M),
 }
 
 pub trait Meetable: Sized {
-    type Meet: Meet;
+    type MeetAction: MeetAction;
     type Met;
-    type Error: Into<<Self::Meet as Meet>::Error>;
+    type Error: Into<<Self::MeetAction as MeetAction>::Error>;
 
-    fn is_met(self) -> Result<MetResult<Self::Met, Self::Meet>, Self::Error>;
+    /// Chek if already Met or provide MeetAction
+    fn try_met(self) -> Result<TryMet<Self::Met, Self::MeetAction>, Self::Error>;
 
-    fn meet(self) -> Result<MeetResult<Self::Met, <Self::Meet as Meet>::Met>, <Self::Meet as Meet>::Error> {
-        match self.is_met() {
-            Ok(MetResult::Met(met)) => Ok(MeetResult::NothingToDo(met)),
+    /// Cheks if AlreadMet or performs MeetAction and provides MeetAction::Met result
+    fn meet(self) -> Result<Meet<Self::Met, <Self::MeetAction as MeetAction>::Met>, <Self::MeetAction as MeetAction>::Error> {
+        match self.try_met() {
+            Ok(TryMet::Met(met)) => Ok(Meet::AlreadyMet(met)),
             Err(err) => Err(err.into()),
-            Ok(MetResult::Unmet(meet)) => {
+            Ok(TryMet::MeetAction(meet)) => {
                 match meet.meet() {
-                    Ok(met) => Ok(MeetResult::NowMet(met)),
+                    Ok(met) => Ok(Meet::Met(met)),
                     Err(err) => Err(err)
                 }
             }
@@ -35,25 +37,25 @@ pub trait Meetable: Sized {
     }
 }
 
-pub trait Meet {
+pub trait MeetAction {
     type Met;
     type Error;
 
     fn meet(self) -> Result<Self::Met, Self::Error>;
 }
 
-impl<MET, MEET, IMF, METE> Meetable for IMF 
-where IMF: FnOnce() -> Result<MetResult<MET, MEET>, METE>, MEET: Meet, METE: Into<<MEET as Meet>::Error> {
-    type Meet = MEET;
+impl<MET, MA, IMF, METE> Meetable for IMF 
+where IMF: FnOnce() -> Result<TryMet<MET, MA>, METE>, MA: MeetAction, METE: Into<<MA as MeetAction>::Error> {
+    type MeetAction = MA;
     type Met = MET;
     type Error = METE;
 
-    fn is_met(self) -> Result<MetResult<Self::Met, Self::Meet>, Self::Error> {
+    fn try_met(self) -> Result<TryMet<Self::Met, Self::MeetAction>, Self::Error> {
         self()
     }
 }
 
-impl<MET, MF, MEETE> Meet for MF
+impl<MET, MF, MEETE> MeetAction for MF
 where MF: FnOnce() -> Result<MET, MEETE> {
     type Met = MET;
     type Error = MEETE;
@@ -79,17 +81,16 @@ pub trait Existential: Sized {
 #[cfg(test)]
 mod test {
     use super::*;
-    use super::MetResult::*;
-    use super::MeetResult::*;
+    use super::Meet::*;
 
     #[test]
     fn closure() {
-        fn promise(met: bool, fail: bool) -> impl Meetable<Met = u8, Meet = impl Meet<Met = u16, Error = i16>, Error = i8> {
+        fn promise(met: bool, fail: bool) -> impl Meetable<Met = u8, MeetAction = impl MeetAction<Met = u16, Error = i16>, Error = i8> {
             move || {
                 match (met, fail) {
-                    (true, false) => Ok(Met(1)),
+                    (true, false) => Ok(TryMet::Met(1)),
                     (true, true) => Err(2),
-                    _ => Ok(Unmet(move || match fail {
+                    _ => Ok(TryMet::MeetAction(move || match fail {
                         false => Ok(3),
                         true => Err(4),
                     }))
@@ -97,9 +98,9 @@ mod test {
             }
         }
 
-        assert_matches!(promise(true, false).meet(), Ok(NothingToDo(1u8)));
+        assert_matches!(promise(true, false).meet(), Ok(AlreadyMet(1u8)));
         assert_matches!(promise(true, true).meet(), Err(2i16));
-        assert_matches!(promise(false, false).meet(), Ok(NowMet(3u16)));
+        assert_matches!(promise(false, false).meet(), Ok(Met(3u16)));
         assert_matches!(promise(false, true).meet(), Err(4i16));
     }
 }
