@@ -1,10 +1,36 @@
 /*!
 Object implementing `Ensure` trait are in unknown inital state and can be brought to a target state.
 
-By calling `met()` object can be ensured to be in its target state.
-If object was already in target state nothing happens. Otherwise `met()` will call `meet()` on provided `MeetAction` to bring the object into its target state.
+By calling `met()` we can be ensured that object is in its target state regardles if it was already in that state or had to be brought to it.
+If object was already in target state nothing happens. Otherwise `met()` will call `meet()` on provided `MeetAction` type to bring the object into its target state.
 
-If object implements `Clone` method `met_verify()` can be used to make sure that object fulfills `Met` condition after `MeetAction` has been preformed.
+If object implements `Clone` method `met_verify()` can be used to make sure that object fulfills `Met` condition after `MeetAction` type has been preformed.
+
+Closures returning `TryMetResult` that also return closure in `TryMetResult::MeetAction` variant automatically implement `Ensure` trait. 
+Helper function `ensure` can be used to call `met()` on such closure.
+
+# Example
+
+This program will create file only if it does not exist.
+
+```rust
+use std::path::Path;
+use std::fs::File;
+use ensure::ensure;
+use ensure::TryMetResult::*;
+
+let path = Path::new("/tmp/foo.txt");
+
+ensure(|| {
+    if path.exists() {
+        Met(())
+    } else {
+        MeetAction(|| {
+            File::create(&path).unwrap();
+        })
+    }
+});
+```
 */
 
 use std::fmt;
