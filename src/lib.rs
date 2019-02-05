@@ -1,83 +1,101 @@
+/*!
+Object implementing `Ensure` trait are in unknown inital state and can be brought to a target state.
+
+By calling `met()` object can be ensured to be in its target state.
+If object was already in target state nothing happens. Otherwise `met()` will call `meet()` on provided `MeetAction` to bring the object into its target state.
+
+If object implements `Clone` method `met_verify()` can be used to make sure that object fulfills `Met` condition after `MeetAction` has been preformed.
+*/
+
+use std::fmt;
+use std::error::Error;
+
+/// Result of verification if object is in target state with `try_met()`
 #[derive(Debug)]
-pub enum TryMet<M, U> {
+pub enum TryMetResult<M, U> {
     Met(M),
     MeetAction(U),
 }
 
+/// Result of ensuring target state with `met()`
 #[derive(Debug)]
-pub enum Meet<N, M> {
+pub enum MetResult<N, M> {
     AlreadyMet(N),
     Met(M),
 }
 
+#[derive(Debug)]
+pub struct UnmetError;
+
+impl fmt::Display for UnmetError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "verification of target state failed after it was ensured to be met")
+    }
+}
+
+impl Error for UnmetError {}
+
+/// Implement for types of objects that can be brought to target state
 pub trait Ensure: Sized {
     type MeetAction: MeetAction;
     type Met;
-    type Error: Into<<Self::MeetAction as MeetAction>::Error>;
 
-    /// Chek if already Met or provide MeetAction
-    fn try_met(self) -> Result<TryMet<Self::Met, Self::MeetAction>, Self::Error>;
+    /// Check if already `Met` or provide `MeetAction` which can be performed by calling `meet()`
+    fn try_met(self) -> TryMetResult<Self::Met, Self::MeetAction>;
 
-    /// Cheks if AlreadMet or performs MeetAction and provides MeetAction::Met result
-    fn met(self) -> Result<Meet<Self::Met, <Self::MeetAction as MeetAction>::Met>, <Self::MeetAction as MeetAction>::Error> {
+    /// Meet the Ensure by calling `try_met()` and if not `Met` calling `meet()` on `MeetAction`
+    fn met(self) -> MetResult<Self::Met, <Self::MeetAction as MeetAction>::Met> {
         match self.try_met() {
-            Ok(TryMet::Met(met)) => Ok(Meet::AlreadyMet(met)),
-            Err(err) => Err(err.into()),
-            Ok(TryMet::MeetAction(meet)) => {
-                match meet.meet() {
-                    Ok(met) => Ok(Meet::Met(met)),
-                    Err(err) => Err(err)
-                }
-            }
+            TryMetResult::Met(met) => MetResult::AlreadyMet(met),
+            TryMetResult::MeetAction(meet) => MetResult::Met(meet.meet()),
         }
     }
 
-    /// Meet and assert it is Met
-    fn met_assert(self) -> Result<Self::Met, <Self::MeetAction as MeetAction>::Error> where Self: Clone {
+    /// Ensure it is `met()` and then verify it is in fact `Met` with `try_met()`
+    fn met_verify(self) -> Result<Self::Met, UnmetError> where Self: Clone {
         let verify = self.clone();
         match self.met() {
-            Err(err) => Err(err),
-            Ok(Meet::AlreadyMet(met)) => Ok(met),
-            Ok(Meet::Met(_action_met)) => match verify.try_met() {
-                Err(err) => Err(err.into()),
-                Ok(TryMet::Met(met)) => Ok(met),
-                Ok(TryMet::MeetAction(_action)) => panic!("Ensure not Met after applying MeetAction")
+            MetResult::AlreadyMet(met) => Ok(met),
+            MetResult::Met(_action_met) => match verify.try_met() {
+                TryMetResult::Met(met) => Ok(met),
+                TryMetResult::MeetAction(_action) => Err(UnmetError),
             }
         }
     }
 }
 
+/// Function that can be used to bring object in its target state
 pub trait MeetAction {
     type Met;
-    type Error;
 
-    fn meet(self) -> Result<Self::Met, Self::Error>;
+    fn meet(self) -> Self::Met;
 }
 
-impl<MET, MA, IMF, METE> Ensure for IMF 
-where IMF: FnOnce() -> Result<TryMet<MET, MA>, METE>, MA: MeetAction, METE: Into<<MA as MeetAction>::Error> {
+impl<MET, MA, IMF> Ensure for IMF 
+where IMF: FnOnce() -> TryMetResult<MET, MA>, MA: MeetAction {
     type MeetAction = MA;
     type Met = MET;
-    type Error = METE;
 
-    fn try_met(self) -> Result<TryMet<Self::Met, Self::MeetAction>, Self::Error> {
+    fn try_met(self) -> TryMetResult<Self::Met, Self::MeetAction> {
         self()
     }
 }
 
-impl<MET, MF, MEETE> MeetAction for MF
-where MF: FnOnce() -> Result<MET, MEETE> {
+impl<MET, MF> MeetAction for MF
+where MF: FnOnce() -> MET {
     type Met = MET;
-    type Error = MEETE;
 
-    fn meet(self) -> Result<Self::Met, Self::Error> {
+    fn meet(self) -> Self::Met {
         self()
     }
 }
 
+/// Mark `T` as something that exists
 pub struct Existing<T>(pub T);
+/// Mark `T` as something that does not exists
 pub struct NonExisting<T>(pub T);
 
+/// Extends any `T` with method allowing to declare it as existing or non-existing
 pub trait Existential: Sized {
     fn assume_existing(self) -> Existing<Self> {
         Existing(self)
@@ -88,30 +106,26 @@ pub trait Existential: Sized {
     }
 }
 
+impl<T> Existential for T {}
+
 #[cfg(test)]
 mod test {
     use super::*;
-    use super::Meet::*;
+    use super::MetResult::*;
     use assert_matches::*;
 
     #[test]
     fn closure() {
-        fn ensure(met: bool, fail: bool) -> impl Ensure<Met = u8, MeetAction = impl MeetAction<Met = u16, Error = i16>, Error = i8> {
+        fn ensure(met: bool) -> impl Ensure<Met = u8, MeetAction = impl MeetAction<Met = u16>> {
             move || {
-                match (met, fail) {
-                    (true, false) => Ok(TryMet::Met(1)),
-                    (true, true) => Err(2),
-                    _ => Ok(TryMet::MeetAction(move || match fail {
-                        false => Ok(3),
-                        true => Err(4),
-                    }))
+                match met {
+                    true => TryMetResult::Met(1),
+                    _ => TryMetResult::MeetAction(move || 2)
                 }
             }
         }
 
-        assert_matches!(ensure(true, false).met(), Ok(AlreadyMet(1u8)));
-        assert_matches!(ensure(true, true).met(), Err(2i16));
-        assert_matches!(ensure(false, false).met(), Ok(Met(3u16)));
-        assert_matches!(ensure(false, true).met(), Err(4i16));
+        assert_matches!(ensure(true).met(), AlreadyMet(1));
+        assert_matches!(ensure(false).met(), Met(2));
     }
 }
