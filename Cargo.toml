@@ -1,7 +1,8 @@
 [package]
-name = "meetable"
+name = "ensure"
 version = "0.1.0"
-authors = ["Jakub Pastuszek <jpastuszek@gmail.com>"]
+authors = ["Jakub Pastuszek <jpastuszek@protonmail.com>"]
+edition = "2018"
 
 [dev-dependencies]
 assert_matches = "1.3.0"
