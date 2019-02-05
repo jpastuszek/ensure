@@ -24,6 +24,15 @@ pub enum MetResult<N, M> {
     Met(M),
 }
 
+impl<T> MetResult<T, T> {
+    /// When `Ensure::Met` and `Ensure::MeetAction::Met` types are the same `coalesce()` will return single return type regardless of actual result
+    pub fn coalesce(self) -> T {
+        match self {
+            MetResult::AlreadyMet(met) | MetResult::Met(met) => met
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct UnmetError;
 
@@ -121,7 +130,7 @@ mod test {
     use assert_matches::*;
 
     #[test]
-    fn closure() {
+    fn test_closure() {
         fn test(met: bool) -> impl Ensure<Met = u8, MeetAction = impl MeetAction<Met = u16>> {
             move || {
                 match met {
@@ -136,5 +145,20 @@ mod test {
 
         assert_matches!(ensure(test(true)), AlreadyMet(1));
         assert_matches!(ensure(test(false)), Met(2));
+    }
+
+    #[test]
+    fn test_coalesce() {
+        fn test(met: bool) -> impl Ensure<Met = u8, MeetAction = impl MeetAction<Met = u8>> {
+            move || {
+                match met {
+                    true => TryMetResult::Met(1),
+                    _ => TryMetResult::MeetAction(move || 2)
+                }
+            }
+        }
+
+        assert_matches!(ensure(test(true)).coalesce(), 1);
+        assert_matches!(ensure(test(false)).coalesce(), 2);
     }
 }
