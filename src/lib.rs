@@ -90,6 +90,12 @@ where MF: FnOnce() -> MET {
     }
 }
 
+/// Run `met()` on object implementing `Ensure` and return its value.
+/// This is useful with closures implementing `Ensure`.
+pub fn ensure<E>(ensure: E) -> MetResult<E::Met, <E::MeetAction as MeetAction>::Met> where E:  Ensure {
+    ensure.met()
+}
+
 /// Mark `T` as something that exists
 pub struct Existing<T>(pub T);
 /// Mark `T` as something that does not exists
@@ -116,7 +122,7 @@ mod test {
 
     #[test]
     fn closure() {
-        fn ensure(met: bool) -> impl Ensure<Met = u8, MeetAction = impl MeetAction<Met = u16>> {
+        fn test(met: bool) -> impl Ensure<Met = u8, MeetAction = impl MeetAction<Met = u16>> {
             move || {
                 match met {
                     true => TryMetResult::Met(1),
@@ -125,7 +131,10 @@ mod test {
             }
         }
 
-        assert_matches!(ensure(true).met(), AlreadyMet(1));
-        assert_matches!(ensure(false).met(), Met(2));
+        assert_matches!(test(true).met(), AlreadyMet(1));
+        assert_matches!(test(false).met(), Met(2));
+
+        assert_matches!(ensure(test(true)), AlreadyMet(1));
+        assert_matches!(ensure(test(false)), Met(2));
     }
 }
