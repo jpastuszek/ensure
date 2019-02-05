@@ -158,7 +158,7 @@ mod test {
             }
         }
 
-        assert_matches!(ensure(test(true)).coalesce(), 1);
-        assert_matches!(ensure(test(false)).coalesce(), 2);
+        assert_eq!(ensure(test(true)).coalesce(), 1);
+        assert_eq!(ensure(test(false)).coalesce(), 2);
     }
 }
