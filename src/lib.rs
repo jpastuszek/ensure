@@ -43,22 +43,6 @@ pub enum TryMetResult<M, U> {
     MeetAction(U),
 }
 
-/// Result of ensuring target state with `met()`
-#[derive(Debug)]
-pub enum MetResult<N, M> {
-    AlreadyMet(N),
-    Met(M),
-}
-
-impl<T> MetResult<T, T> {
-    /// When `Ensure::Met` and `Ensure::MeetAction::Met` types are the same `coalesce()` will return single return type regardless of actual result
-    pub fn coalesce(self) -> T {
-        match self {
-            MetResult::AlreadyMet(met) | MetResult::Met(met) => met
-        }
-    }
-}
-
 #[derive(Debug)]
 pub struct UnmetError;
 
@@ -72,28 +56,31 @@ impl Error for UnmetError {}
 
 /// Implement for types of objects that can be brought to target state
 pub trait Ensure: Sized {
-    type MeetAction: MeetAction;
     type Met;
+    type MeetAction: MeetAction<Met = Self::Met>;
 
     /// Check if already `Met` or provide `MeetAction` which can be performed by calling `meet()`
     fn try_met(self) -> TryMetResult<Self::Met, Self::MeetAction>;
 
     /// Meet the Ensure by calling `try_met()` and if not `Met` calling `meet()` on `MeetAction`
-    fn met(self) -> MetResult<Self::Met, <Self::MeetAction as MeetAction>::Met> {
+    fn met(self) -> Self::Met {
         match self.try_met() {
-            TryMetResult::Met(met) => MetResult::AlreadyMet(met),
-            TryMetResult::MeetAction(meet) => MetResult::Met(meet.meet()),
+            TryMetResult::Met(met) => met,
+            TryMetResult::MeetAction(meet) => meet.meet(),
         }
     }
 
     /// Ensure it is `met()` and then verify it is in fact `Met` with `try_met()`
     fn met_verify(self) -> Result<Self::Met, UnmetError> where Self: Clone {
         let verify = self.clone();
-        match self.met() {
-            MetResult::AlreadyMet(met) => Ok(met),
-            MetResult::Met(_action_met) => match verify.try_met() {
-                TryMetResult::Met(met) => Ok(met),
-                TryMetResult::MeetAction(_action) => Err(UnmetError),
+        match self.try_met() {
+            TryMetResult::Met(met) => Ok(met),
+            TryMetResult::MeetAction(action) => {
+                let result = action.meet();
+                match verify.try_met() {
+                    TryMetResult::Met(_met) => Ok(result),
+                    TryMetResult::MeetAction(_action) => Err(UnmetError),
+                }
             }
         }
     }
@@ -107,7 +94,7 @@ pub trait MeetAction {
 }
 
 impl<MET, MA, IMF> Ensure for IMF 
-where IMF: FnOnce() -> TryMetResult<MET, MA>, MA: MeetAction {
+where IMF: FnOnce() -> TryMetResult<MET, MA>, MA: MeetAction<Met = MET> {
     type MeetAction = MA;
     type Met = MET;
 
@@ -127,7 +114,7 @@ where MF: FnOnce() -> MET {
 
 /// Run `met()` on object implementing `Ensure` and return its value.
 /// This is useful with closures implementing `Ensure`.
-pub fn ensure<E>(ensure: E) -> MetResult<E::Met, <E::MeetAction as MeetAction>::Met> where E:  Ensure {
+pub fn ensure<E>(ensure: E) -> E::Met where E:  Ensure {
     ensure.met()
 }
 
@@ -152,12 +139,10 @@ impl<T> Existential for T {}
 #[cfg(test)]
 mod test {
     use super::*;
-    use super::MetResult::*;
-    use assert_matches::*;
 
     #[test]
     fn test_closure() {
-        fn test(met: bool) -> impl Ensure<Met = u8, MeetAction = impl MeetAction<Met = u16>> {
+        fn test(met: bool) -> impl Ensure<Met = u8> {
             move || {
                 match met {
                     true => TryMetResult::Met(1),
@@ -166,25 +151,10 @@ mod test {
             }
         }
 
-        assert_matches!(test(true).met(), AlreadyMet(1));
-        assert_matches!(test(false).met(), Met(2));
+        assert_eq!(test(true).met(), 1);
+        assert_eq!(test(false).met(), 2);
 
-        assert_matches!(ensure(test(true)), AlreadyMet(1));
-        assert_matches!(ensure(test(false)), Met(2));
-    }
-
-    #[test]
-    fn test_coalesce() {
-        fn test(met: bool) -> impl Ensure<Met = u8, MeetAction = impl MeetAction<Met = u8>> {
-            move || {
-                match met {
-                    true => TryMetResult::Met(1),
-                    _ => TryMetResult::MeetAction(move || 2)
-                }
-            }
-        }
-
-        assert_eq!(ensure(test(true)).coalesce(), 1);
-        assert_eq!(ensure(test(false)).coalesce(), 2);
+        assert_eq!(ensure(test(true)), 1);
+        assert_eq!(ensure(test(false)), 2);
     }
 }
