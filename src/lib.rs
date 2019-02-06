@@ -12,7 +12,7 @@ Helper function `ensure` can be used to call `ensure()` on such closure.
 
 # Example
 
-This program will create file only if it does not exist.
+This program will create file only if it does not exist already.
 
 ```rust
 use std::path::Path;
@@ -24,13 +24,13 @@ let path = Path::new("/tmp/foo.txt");
 
 ensure(|| {
     if path.exists() {
-        Met(())
+        Met(File::open(&path))
     } else {
         EnsureAction(|| {
-            File::create(&path).unwrap();
+            File::create(&path)
         })
     }
-});
+}).expect("failed to open file");
 ```
 */
 
