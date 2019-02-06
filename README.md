@@ -1,6 +1,6 @@
-This library provides `Ensure` trait that is useful for objects with unknown initial state that can be brought to some target state.
+This library provides `Ensure` trait that is useful for objects with unknown initial external state that can be brought to some target state.
 
-This can be seen as `TryInto` trait for objects with side effects in unknown initial state and desired target.
+This can be seen as `TryInto` trait for objects with side effects with unknown initial external state and desired target state.
 For example a file may or may not exist. By implementing `Ensure` we can call `ensure()` to create new file only if it did not exist already.
 
 Closures returning `CheckEnsureResult` that also return closure in `CheckEnsureResult::EnsureAction` variant automatically implement `Ensure` trait. 

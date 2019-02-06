@@ -1,7 +1,7 @@
 /*!
-Object implementing `Ensure` trait are in unknown inital state and can be brought to a target state.
+Object implementing `Ensure` trait are in unknown inital external state and can be brought to a target state.
 
-This can be seen as `TryInto` trait for objects with side effects in unknown initial state and desired target.
+This can be seen as `TryInto` trait for objects with side effects with unknown initial external state and desired target state.
 
 By calling `ensure()` we can be ensured that object is in its target state regardles if it was already in that state or had to be brought to it.
 If object was already in target state nothing happens. Otherwise `ensure()` will call `meet()` on provided `EnsureAction` type to bring the object into its target state.
@@ -33,6 +33,15 @@ ensure(|| {
     })
 }).expect("failed to create file");
 ```
+
+# Existential types
+
+This crate also provides `Present<T>` and `Absent<T>` wrapper types to mark ensured external states in type system.
+
+If `T` implements `Ensure<Present<T>>` and `Ensure<Absetnt<T>>` it automatically implements `Existential<T>` trait 
+that provides methods `ensure_present()` and `ensure_absent()`.
+
+See tests for example usage.
 */
 
 use std::fmt;
@@ -46,15 +55,16 @@ pub enum CheckEnsureResult<M, A> {
 }
 
 #[derive(Debug)]
-pub struct UnmetError;
+pub struct VerificationError;
 
-impl fmt::Display for UnmetError {
+impl fmt::Display for VerificationError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "verification of target state failed after it was ensured to be met")
     }
 }
 
-impl Error for UnmetError {}
+/// Error raised if `Ensure::ensure_verify()` failed verification
+impl Error for VerificationError {}
 
 /// Function that can be used to bring object in its target state
 pub trait Meet {
@@ -68,10 +78,10 @@ pub trait Meet {
 pub trait Ensure<T>: Sized {
     type EnsureAction: Meet<Met = T>;
 
-    /// Check if already `Met` or provide `EnsureAction` which can be performed by calling `meet()`
+    /// Checks if target state is already `Met` or provides `EnsureAction` object which can by used to bring external state to target state by calling its `meet()` method
     fn check_ensure(self) -> Result<CheckEnsureResult<T, Self::EnsureAction>, <Self::EnsureAction as Meet>::Error>;
 
-    /// Meet the Ensure by calling `check_ensure()` and if not `Met` calling `meet()` on `EnsureAction`
+    /// Ensure target state by calling `check_ensure()` and if not `Met` calling `meet()` on `EnsureAction`
     fn ensure(self) -> Result<T, <Self::EnsureAction as Meet>::Error> {
         match self.check_ensure()? {
             CheckEnsureResult::Met(met) => Ok(met),
@@ -79,8 +89,8 @@ pub trait Ensure<T>: Sized {
         }
     }
 
-    /// Ensure it is `ensure()` and then verify it is in fact `Met` with `check_ensure()`
-    fn ensure_verify(self) -> Result<T, <Self::EnsureAction as Meet>::Error> where Self: Clone, <Self::EnsureAction as Meet>::Error: From<UnmetError> {
+    /// Ensure target state and then verify that `EnsureAction` actually brought external state to target state by calling `check_ensure()` on clone of `self`
+    fn ensure_verify(self) -> Result<T, <Self::EnsureAction as Meet>::Error> where Self: Clone, <Self::EnsureAction as Meet>::Error: From<VerificationError> {
         let verify = self.clone();
         match self.check_ensure()? {
             CheckEnsureResult::Met(met) => Ok(met),
@@ -88,7 +98,7 @@ pub trait Ensure<T>: Sized {
                 let result = action.meet()?;
                 match verify.check_ensure()? {
                     CheckEnsureResult::Met(_met) => Ok(result),
-                    CheckEnsureResult::EnsureAction(_action) => Err(UnmetError.into()),
+                    CheckEnsureResult::EnsureAction(_action) => Err(VerificationError.into()),
                 }
             }
         }
@@ -120,10 +130,34 @@ pub fn ensure<T, E, R, A>(ensure: R) -> Result<T, E> where R: Ensure<T, EnsureAc
     ensure.ensure()
 }
 
-/// Mark `T` as something that exists
+/// Mark `T` as something that exists.
 pub struct Present<T>(pub T);
-/// Mark `T` as something that does not exists
+/// Mark `T` as something that does not exist.
 pub struct Absent<T>(pub T);
+
+/// Types implement `Existential` trait if they implement both `Ensure<Present<T>>` and `Ensure<Absent<T>>`.
+pub trait Existential<T> {
+    type Error;
+
+    /// Ensure that `T` is `Present<T>`
+    fn ensure_present(self) -> Result<Present<T>, Self::Error>;
+    /// Ensure that `T` is `Absent<T>`
+    fn ensure_absent(self) -> Result<Absent<T>, Self::Error>;
+}
+
+impl<T, E, R, PA, AA> Existential<T> for R where 
+    R: Ensure<Present<T>, EnsureAction = PA>, PA: Meet<Met = Present<T>, Error = E>,
+    R: Ensure<Absent<T>, EnsureAction = AA>, AA: Meet<Met = Absent<T>, Error = E>
+{
+    type Error = E;
+
+    fn ensure_present(self) -> Result<Present<T>, Self::Error> {
+        self.ensure()
+    }
+    fn ensure_absent(self) -> Result<Absent<T>, Self::Error> {
+        self.ensure()
+    }
+}
 
 #[cfg(test)]
 mod test {
@@ -198,5 +232,11 @@ mod test {
     fn test_ensure() {
         let _r: Result<Present<Resource>, ()> = Resource.ensure();
         let _r: Result<Absent<Resource>, ()> = Resource.ensure();
+    }
+
+    #[test]
+    fn test_existential() {
+        let _r: Result<Present<Resource>, ()> = Resource.ensure_present();
+        let _r: Result<Absent<Resource>, ()> = Resource.ensure_absent();
     }
 }
