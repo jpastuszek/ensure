@@ -1,13 +1,14 @@
 /*!
 Object implementing `Ensure` trait are in unknown inital state and can be brought to a target state.
-This can be seen as `Into` trait for side effects on objects in unknown initial state.
+
+This can be seen as `TryInto` trait for objects with side effects in unknown initial state and desired target.
 
 By calling `ensure()` we can be ensured that object is in its target state regardles if it was already in that state or had to be brought to it.
 If object was already in target state nothing happens. Otherwise `ensure()` will call `meet()` on provided `EnsureAction` type to bring the object into its target state.
 
 If object implements `Clone` method `ensure_verify()` can be used to make sure that object fulfills `Met` condition after `EnsureAction` type has been preformed.
 
-Closures returning `CheckEnsureResult` that also return closure in `CheckEnsureResult::EnsureAction` variant automatically implement `Ensure` trait. 
+Closures returning `Result<CheckEnsureResult, E>` that also return closure in `CheckEnsureResult::EnsureAction` variant automatically implement `Ensure` trait. 
 Helper function `ensure` can be used to call `ensure()` on such closure.
 
 # Example
@@ -23,14 +24,14 @@ use ensure::CheckEnsureResult::*;
 let path = Path::new("/tmp/foo.txt");
 
 ensure(|| {
-    if path.exists() {
-        Met(File::open(&path))
+    Ok(if path.exists() {
+        Met(())
     } else {
         EnsureAction(|| {
-            File::create(&path)
+            File::create(&path).map(|file| drop(file))
         })
-    }
-}).expect("failed to open file");
+    })
+}).expect("failed to create file");
 ```
 */
 
@@ -55,65 +56,67 @@ impl fmt::Display for UnmetError {
 
 impl Error for UnmetError {}
 
+/// Function that can be used to bring object in its target state
+pub trait Meet {
+    type Met;
+    type Error;
+
+    fn meet(self) -> Result<Self::Met, Self::Error>;
+}
+
 /// Implement for types of objects that can be brought to target state `T`
 pub trait Ensure<T>: Sized {
     type EnsureAction: Meet<Met = T>;
 
     /// Check if already `Met` or provide `EnsureAction` which can be performed by calling `meet()`
-    fn check_ensure(self) -> CheckEnsureResult<T, Self::EnsureAction>;
+    fn check_ensure(self) -> Result<CheckEnsureResult<T, Self::EnsureAction>, <Self::EnsureAction as Meet>::Error>;
 
     /// Meet the Ensure by calling `check_ensure()` and if not `Met` calling `meet()` on `EnsureAction`
-    fn ensure(self) -> T {
-        match self.check_ensure() {
-            CheckEnsureResult::Met(met) => met,
+    fn ensure(self) -> Result<T, <Self::EnsureAction as Meet>::Error> {
+        match self.check_ensure()? {
+            CheckEnsureResult::Met(met) => Ok(met),
             CheckEnsureResult::EnsureAction(meet) => meet.meet(),
         }
     }
 
     /// Ensure it is `ensure()` and then verify it is in fact `Met` with `check_ensure()`
-    fn ensure_verify(self) -> Result<T, UnmetError> where Self: Clone {
+    fn ensure_verify(self) -> Result<T, <Self::EnsureAction as Meet>::Error> where Self: Clone, <Self::EnsureAction as Meet>::Error: From<UnmetError> {
         let verify = self.clone();
-        match self.check_ensure() {
+        match self.check_ensure()? {
             CheckEnsureResult::Met(met) => Ok(met),
             CheckEnsureResult::EnsureAction(action) => {
-                let result = action.meet();
-                match verify.check_ensure() {
+                let result = action.meet()?;
+                match verify.check_ensure()? {
                     CheckEnsureResult::Met(_met) => Ok(result),
-                    CheckEnsureResult::EnsureAction(_action) => Err(UnmetError),
+                    CheckEnsureResult::EnsureAction(_action) => Err(UnmetError.into()),
                 }
             }
         }
     }
 }
 
-/// Function that can be used to bring object in its target state
-pub trait Meet {
-    type Met;
-
-    fn meet(self) -> Self::Met;
-}
-
-impl<T, A, F> Ensure<T> for F 
-where F: FnOnce() -> CheckEnsureResult<T, A>, A: Meet<Met = T> {
+impl<T, E, A, F> Ensure<T> for F 
+where F: FnOnce() -> Result<CheckEnsureResult<T, A>, E>, A: Meet<Met = T, Error = E> {
     type EnsureAction = A;
 
-    fn check_ensure(self) -> CheckEnsureResult<T, Self::EnsureAction> {
+    fn check_ensure(self) -> Result<CheckEnsureResult<T, Self::EnsureAction>, E> {
         self()
     }
 }
 
-impl<T, F> Meet for F
-where F: FnOnce() -> T {
+impl<T, E, F> Meet for F
+where F: FnOnce() -> Result<T, E> {
     type Met = T;
+    type Error = E;
 
-    fn meet(self) -> Self::Met {
+    fn meet(self) -> Result<Self::Met, Self::Error> {
         self()
     }
 }
 
 /// Run `ensure()` on object implementing `Ensure` and return its value.
 /// This is useful with closures implementing `Ensure`.
-pub fn ensure<E, T>(ensure: E) -> T where E:  Ensure<T> {
+pub fn ensure<T, E, R, A>(ensure: R) -> Result<T, E> where R: Ensure<T, EnsureAction = A>, A: Meet<Met = T, Error = E> {
     ensure.ensure()
 }
 
@@ -129,63 +132,65 @@ mod test {
 
     #[test]
     fn test_closure() {
-        fn test(met: bool) -> impl Ensure<u8> {
+        fn test(met: bool) -> impl Ensure<u8, EnsureAction = impl Meet<Met = u8, Error = ()>> {
             move || {
-                match met {
+                Ok(match met {
                     true => Met(1),
-                    _ => EnsureAction(move || 2)
-                }
+                    _ => EnsureAction(|| Ok(2))
+                })
             }
         }
 
-        assert_eq!(test(true).ensure(), 1);
-        assert_eq!(test(false).ensure(), 2);
+        assert_eq!(test(true).ensure(), Ok(1));
+        assert_eq!(test(false).ensure(), Ok(2));
 
-        assert_eq!(ensure(test(true)), 1);
-        assert_eq!(ensure(test(false)), 2);
+        assert_eq!(ensure(test(true)), Ok(1));
+        assert_eq!(ensure(test(false)), Ok(2));
     }
 
     struct Resource;
 
     struct CreateResourceAction(Resource);
     impl Meet for CreateResourceAction {
-        type Met = Result<Present<Resource>, ()>;
+        type Met = Present<Resource>;
+        type Error = ();
 
         fn meet(self) -> Result<Present<Resource>, ()> {
             Ok(Present(self.0))
         }
     }
 
-    impl Ensure<Result<Present<Resource>, ()>> for Resource {
+    impl Ensure<Present<Resource>> for Resource {
         type EnsureAction = CreateResourceAction;
 
-        fn check_ensure(self) -> CheckEnsureResult<Result<Present<Resource>, ()>, Self::EnsureAction> {
-            if true {
-                Met(Ok(Present(self)))
+        fn check_ensure(self) -> Result<CheckEnsureResult<Present<Resource>, Self::EnsureAction>, ()> {
+            Ok(if true {
+                Met(Present(self))
             } else {
                 EnsureAction(CreateResourceAction(self))
-            }
+            })
         }
     }
 
     struct DeleteResourceAction(Resource);
     impl Meet for DeleteResourceAction {
-        type Met = Result<Absent<Resource>, ()>;
+        type Met = Absent<Resource>;
+        type Error = ();
 
         fn meet(self) -> Result<Absent<Resource>, ()> {
             Ok(Absent(self.0))
         }
     }
 
-    impl Ensure<Result<Absent<Resource>, ()>> for Resource {
+    impl Ensure<Absent<Resource>> for Resource {
         type EnsureAction = DeleteResourceAction;
 
-        fn check_ensure(self) -> CheckEnsureResult<Result<Absent<Resource>, ()>, Self::EnsureAction> {
-            if true {
-                Met(Ok(Absent(self)))
+        fn check_ensure(self) -> Result<CheckEnsureResult<Absent<Resource>, Self::EnsureAction>, ()> {
+            Ok(if true {
+                Met(Absent(self))
             } else {
                 EnsureAction(DeleteResourceAction(self))
-            }
+            })
         }
     }
 

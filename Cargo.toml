@@ -9,6 +9,3 @@ readme = "README.md"
 keywords = ["state"]
 categories = ["data-structures"]
 license = "MIT"
-
-[dev-dependencies]
-assert_matches = "1.3.0"
