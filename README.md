@@ -1,7 +1,7 @@
 This library provides `Ensure` trait that is useful for objects with unknown initial state that can be brought to some target state.
 For example a file may or may not exist. By implementing `Ensure` we can call `ensure()` to create new file only if it did not exist already.
 
-Closures returning `CheckEnsureResult` that also return closure in `CheckEnsureResult::MeetAction` variant automatically implement `Ensure` trait. 
+Closures returning `CheckEnsureResult` that also return closure in `CheckEnsureResult::EnsureAction` variant automatically implement `Ensure` trait. 
 Helper function `ensure` can be used to call `ensure()` on such closure.
 
 # Example
@@ -21,7 +21,7 @@ fn main() {
         if path.exists() {
             Met(())
         } else {
-            MeetAction(|| {
+            EnsureAction(|| {
                 File::create(&path).unwrap();
             })
         }
