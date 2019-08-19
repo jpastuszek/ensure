@@ -166,6 +166,14 @@ impl<T> PartialOrd for Present<T> where T: PartialOrd {
     }
 }
 
+impl<T> Eq for Present<T> where T: Eq {}
+
+impl<T> Ord for Present<T> where T: Ord {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.0.cmp(&other.0)
+    }
+}
+
 impl<T> Deref for Absent<T> {
     type Target = T;
 
@@ -191,6 +199,14 @@ impl<T> PartialEq for Absent<T> where T: PartialEq {
 impl<T> PartialOrd for Absent<T> where T: PartialOrd {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         self.0.partial_cmp(&other.0)
+    }
+}
+
+impl<T> Eq for Absent<T> where T: Eq {}
+
+impl<T> Ord for Absent<T> where T: Ord {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.0.cmp(&other.0)
     }
 }
 
