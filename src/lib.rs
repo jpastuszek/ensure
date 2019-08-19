@@ -8,7 +8,7 @@ If object was already in target state nothing happens. Otherwise `ensure()` will
 
 If object implements `Clone` method `ensure_verify()` can be used to make sure that object fulfills `Met` condition after `EnsureAction` type has been preformed.
 
-Closures returning `Result<CheckEnsureResult, E>` that also return closure in `CheckEnsureResult::EnsureAction` variant automatically implement `Ensure` trait. 
+Closures returning `Result<CheckEnsureResult, E>` that also return closure in `CheckEnsureResult::EnsureAction` variant automatically implement `Ensure` trait.
 Helper function `ensure` can be used to call `ensure()` on such closure.
 
 # Example
@@ -38,14 +38,17 @@ ensure(|| {
 
 This crate also provides `Present<T>` and `Absent<T>` wrapper types to mark ensured external states in type system.
 
-If `T` implements `Ensure<Present<T>>` and `Ensure<Absetnt<T>>` it automatically implements `Existential<T>` trait 
+If `T` implements `Ensure<Present<T>>` and `Ensure<Absetnt<T>>` it automatically implements `Existential<T>` trait
 that provides methods `ensure_present()` and `ensure_absent()`.
 
 See tests for example usage.
 */
 
 use std::fmt;
+use std::fmt::Debug;
 use std::error::Error;
+use std::ops::Deref;
+use std::cmp::Ordering;
 
 /// Result of verification if object is in target state with `check_ensure()`
 #[derive(Debug)]
@@ -105,7 +108,7 @@ pub trait Ensure<T>: Sized {
     }
 }
 
-impl<T, E, A, F> Ensure<T> for F 
+impl<T, E, A, F> Ensure<T> for F
 where F: FnOnce() -> Result<CheckEnsureResult<T, A>, E>, A: Meet<Met = T, Error = E> {
     type EnsureAction = A;
 
@@ -135,6 +138,62 @@ pub struct Present<T>(pub T);
 /// Mark `T` as something that does not exist.
 pub struct Absent<T>(pub T);
 
+impl<T> Deref for Present<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<T> Debug for Present<T> where T: Debug {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("Present")
+            .field(&self.0)
+            .finish()
+    }
+}
+
+impl<T> PartialEq for Present<T> where T: PartialEq {
+    fn eq(&self, other: &Self) -> bool {
+        self.0 == other.0
+    }
+}
+
+impl<T> PartialOrd for Present<T> where T: PartialOrd {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        self.0.partial_cmp(&other.0)
+    }
+}
+
+impl<T> Deref for Absent<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<T> Debug for Absent<T> where T: Debug {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("Absent")
+            .field(&self.0)
+            .finish()
+    }
+}
+
+impl<T> PartialEq for Absent<T> where T: PartialEq {
+    fn eq(&self, other: &Self) -> bool {
+        self.0 == other.0
+    }
+}
+
+impl<T> PartialOrd for Absent<T> where T: PartialOrd {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        self.0.partial_cmp(&other.0)
+    }
+}
+
 /// Types implement `Existential` trait if they implement both `Ensure<Present<T>>` and `Ensure<Absent<T>>`.
 pub trait Existential<T> {
     type Error;
@@ -145,7 +204,7 @@ pub trait Existential<T> {
     fn ensure_absent(self) -> Result<Absent<T>, Self::Error>;
 }
 
-impl<T, E, R, PA, AA> Existential<T> for R where 
+impl<T, E, R, PA, AA> Existential<T> for R where
     R: Ensure<Present<T>, EnsureAction = PA>, PA: Meet<Met = Present<T>, Error = E>,
     R: Ensure<Absent<T>, EnsureAction = AA>, AA: Meet<Met = Absent<T>, Error = E>
 {
