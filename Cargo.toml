@@ -1,6 +1,6 @@
 [package]
 name = "ensure"
-version = "0.2.1"
+version = "0.2.2-alpha.0"
 authors = ["Jakub Pastuszek <jpastuszek@protonmail.com>"]
 edition = "2018"
 description = "Ensure target state of an object"
