@@ -57,6 +57,8 @@ pub enum CheckEnsureResult<M, A> {
     EnsureAction(A),
 }
 
+/// Error reported if external object state test failed for object that was ensured to meet that
+/// state.
 #[derive(Debug)]
 pub struct VerificationError;
 
@@ -66,10 +68,10 @@ impl fmt::Display for VerificationError {
     }
 }
 
-/// Error raised if `Ensure::ensure_verify()` failed verification
+/// Error raised if `Ensure::ensure_verify()` failed verification.
 impl Error for VerificationError {}
 
-/// Function that can be used to bring object in its target state
+/// Function that can be used to bring object in its target state.
 pub trait Meet {
     type Met;
     type Error;
@@ -77,14 +79,14 @@ pub trait Meet {
     fn meet(self) -> Result<Self::Met, Self::Error>;
 }
 
-/// Implement for types of objects that can be brought to target state `T`
+/// Types of objects that can be brought to target state `T`.
 pub trait Ensure<T>: Sized {
     type EnsureAction: Meet<Met = T>;
 
     /// Checks if target state is already `Met` or provides `EnsureAction` object which can by used to bring external state to target state by calling its `meet()` method
     fn check_ensure(self) -> Result<CheckEnsureResult<T, Self::EnsureAction>, <Self::EnsureAction as Meet>::Error>;
 
-    /// Ensure target state by calling `check_ensure()` and if not `Met` calling `meet()` on `EnsureAction`
+    /// Ensures target state by calling `check_ensure()` and if not `Met` calling `meet()` on `EnsureAction`
     fn ensure(self) -> Result<T, <Self::EnsureAction as Meet>::Error> {
         match self.check_ensure()? {
             CheckEnsureResult::Met(met) => Ok(met),
@@ -92,7 +94,7 @@ pub trait Ensure<T>: Sized {
         }
     }
 
-    /// Ensure target state and then verify that `EnsureAction` actually brought external state to target state by calling `check_ensure()` on clone of `self`
+    /// Ensures target state and then verify that `EnsureAction` actually brought external state to target state by calling `check_ensure()` on clone of `self`
     fn ensure_verify(self) -> Result<T, <Self::EnsureAction as Meet>::Error> where Self: Clone, <Self::EnsureAction as Meet>::Error: From<VerificationError> {
         let verify = self.clone();
         match self.check_ensure()? {
@@ -127,18 +129,46 @@ where F: FnOnce() -> Result<T, E> {
     }
 }
 
-/// Run `ensure()` on object implementing `Ensure` and return its value.
+/// Runs `ensure()` on object implementing `Ensure` and return its value.
 /// This is useful with closures implementing `Ensure`.
 pub fn ensure<T, E, R, A>(ensure: R) -> Result<T, E> where R: Ensure<T, EnsureAction = A>, A: Meet<Met = T, Error = E> {
     ensure.ensure()
 }
 
-/// Mark `T` as something that exists.
-pub struct Present<T>(pub T);
-/// Mark `T` as something that does not exist.
-pub struct Absent<T>(pub T);
+/// External objects that state of can be represented in the type system.
+pub trait External { }
 
-impl<T> Deref for Present<T> {
+/// State representations of `External` object in the type system.
+pub trait ExternalState<T> where T: External {
+    /// Gets base undefined state representation from concrete state.
+    fn invalidate_state(self) -> T;
+}
+
+impl<T> ExternalState<T> for T where T: External {
+    fn invalidate_state(self) -> T {
+        self
+    }
+}
+
+/// Marks `External` object as something that exists.
+pub struct Present<T>(pub T) where T: External;
+
+impl<T> ExternalState<T> for Present<T> where T: External {
+    fn invalidate_state(self) -> T {
+        self.0
+    }
+}
+
+/// Marks `External` object as something that does not exist.
+pub struct Absent<T>(pub T) where T: External;
+
+impl<T> ExternalState<T> for Absent<T> where T: External {
+    fn invalidate_state(self) -> T {
+        self.0
+    }
+}
+
+impl<T> Deref for Present<T> where T: External {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
@@ -146,7 +176,7 @@ impl<T> Deref for Present<T> {
     }
 }
 
-impl<T> Debug for Present<T> where T: Debug {
+impl<T> Debug for Present<T> where T: External + Debug {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_tuple("Present")
             .field(&self.0)
@@ -154,27 +184,27 @@ impl<T> Debug for Present<T> where T: Debug {
     }
 }
 
-impl<T> PartialEq for Present<T> where T: PartialEq {
+impl<T> PartialEq for Present<T> where T: External + PartialEq {
     fn eq(&self, other: &Self) -> bool {
         self.0 == other.0
     }
 }
 
-impl<T> PartialOrd for Present<T> where T: PartialOrd {
+impl<T> PartialOrd for Present<T> where T: External + PartialOrd {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         self.0.partial_cmp(&other.0)
     }
 }
 
-impl<T> Eq for Present<T> where T: Eq {}
+impl<T> Eq for Present<T> where T: External + Eq {}
 
-impl<T> Ord for Present<T> where T: Ord {
+impl<T> Ord for Present<T> where T: External + Ord {
     fn cmp(&self, other: &Self) -> Ordering {
         self.0.cmp(&other.0)
     }
 }
 
-impl<T> Deref for Absent<T> {
+impl<T> Deref for Absent<T> where T: External {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
@@ -182,7 +212,7 @@ impl<T> Deref for Absent<T> {
     }
 }
 
-impl<T> Debug for Absent<T> where T: Debug {
+impl<T> Debug for Absent<T> where T: External + Debug {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_tuple("Absent")
             .field(&self.0)
@@ -190,28 +220,28 @@ impl<T> Debug for Absent<T> where T: Debug {
     }
 }
 
-impl<T> PartialEq for Absent<T> where T: PartialEq {
+impl<T> PartialEq for Absent<T> where T: External + PartialEq {
     fn eq(&self, other: &Self) -> bool {
         self.0 == other.0
     }
 }
 
-impl<T> PartialOrd for Absent<T> where T: PartialOrd {
+impl<T> PartialOrd for Absent<T> where T: External + PartialOrd {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         self.0.partial_cmp(&other.0)
     }
 }
 
-impl<T> Eq for Absent<T> where T: Eq {}
+impl<T> Eq for Absent<T> where T: External + Eq {}
 
-impl<T> Ord for Absent<T> where T: Ord {
+impl<T> Ord for Absent<T> where T: External + Ord {
     fn cmp(&self, other: &Self) -> Ordering {
         self.0.cmp(&other.0)
     }
 }
 
-/// Types implement `Existential` trait if they implement both `Ensure<Present<T>>` and `Ensure<Absent<T>>`.
-pub trait Existential<T> {
+/// Existential types are types that can ensure `Present<T>` or `Absent<T>` states for `External` type `T`.
+pub trait Existential<T> where T: External {
     type Error;
 
     /// Ensure that `T` is `Present<T>`
@@ -220,9 +250,11 @@ pub trait Existential<T> {
     fn ensure_absent(self) -> Result<Absent<T>, Self::Error>;
 }
 
+/// Types implement `Existential` trait if they implement both `Ensure<Present<T>>` and `Ensure<Absent<T>>`.
 impl<T, E, R, PA, AA> Existential<T> for R where
     R: Ensure<Present<T>, EnsureAction = PA>, PA: Meet<Met = Present<T>, Error = E>,
-    R: Ensure<Absent<T>, EnsureAction = AA>, AA: Meet<Met = Absent<T>, Error = E>
+    R: Ensure<Absent<T>, EnsureAction = AA>, AA: Meet<Met = Absent<T>, Error = E>,
+    T: External
 {
     type Error = E;
 
