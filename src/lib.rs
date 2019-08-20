@@ -291,6 +291,8 @@ mod test {
 
     struct Resource;
 
+    impl External for Resource {}
+
     struct CreateResourceAction(Resource);
     impl Meet for CreateResourceAction {
         type Met = Present<Resource>;
