@@ -5,6 +5,7 @@ authors = ["Jakub Pastuszek <jpastuszek@protonmail.com>"]
 edition = "2018"
 description = "Ensure target state of an object"
 repository = "https://github.com/jpastuszek/ensure"
+documentation = "https://docs.rs/ensure"
 readme = "README.md"
 keywords = ["state"]
 categories = ["data-structures"]
